@@ -81,7 +81,7 @@ class LinearQuantizeEnv:
         self.cost_lookuptable = self._get_lookuptable()
 
         # sanity check
-        assert self.compress_ratio > self._min_cost() / self._org_cost(), \
+        assert self.compress_ratio >= self._min_cost() / self._org_cost(), \
             'Error! You can make achieve compress_ratio smaller than min_bit!'
 
         # restore weight
@@ -90,11 +90,67 @@ class LinearQuantizeEnv:
                                                                                         self.train_size, self.val_size))
         print('=> original cost: {:.4f}'.format(self._org_cost()))
 
+        self.threshold_lut=[
+            (  1.361,   2.640),
+            (  2.883,   4.277),
+            (  1.220,   6.000),
+            (  0.890,   6.000),
+            (  0.569,   6.000),
+            (  1.041,   6.000),
+            (  0.829,   5.983),
+            (  1.132,   3.304),
+            (  0.509,   6.000),
+            (  1.251,   6.000),
+            (  0.396,   6.000),
+            (  1.060,   5.482),
+            (  0.520,   5.154),
+            (  0.817,   1.726),
+            (  0.500,   2.775),
+            (  0.562,   6.000),
+            (  0.631,   2.768),
+            (  0.424,   3.018),
+            (  1.053,   6.000),
+            (  0.385,   3.066),
+            (  0.587,   4.247),
+            (  0.354,   5.068),
+            (  0.734,   1.508),
+            (  0.474,   1.814),
+            (  0.487,   6.000),
+            (  0.741,   1.576),
+            (  0.385,   2.285),
+            (  0.435,   6.000),
+            (  0.512,   1.678),
+            (  0.337,   3.564),
+            (  0.532,   6.000),
+            (  0.729,   1.753),
+            (  0.523,   3.876),
+            (  0.333,   4.213),
+            (  0.666,   1.514),
+            (  0.314,   6.000),
+            (  0.491,   5.039),
+            (  0.608,   2.278),
+            (  0.336,   6.000),
+            (  0.484,   5.989),
+            (  0.332,   2.481),
+            (  0.413,   6.000),
+            (  0.303,   4.896),
+            (  0.560,   2.440),
+            (  0.261,   6.000),
+            (  0.377,   6.000),
+            (  0.574,   3.272),
+            (  0.321,   6.000),
+            (  0.373,   6.000),
+            (  0.266,   1.957),
+            (  0.648,   3.807),
+            (  0.304,   2.881),
+            (  0.827,   5.870),
+        ]
+
     def adjust_learning_rate(self):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] *= self.finetune_gamma
 
-    def step(self, action):
+    def step(self, action, skipwall=True):
         # Pseudo prune and get the corresponding statistics. The real pruning happens till the end of all pseudo pruning
         action = self._action_wall(action)  # percentage to preserve
 
@@ -106,13 +162,19 @@ class LinearQuantizeEnv:
 
         # all the actions are made
         if self._is_final_layer() and (not self.action_radio_button):
-            self._final_action_wall()
+            if not skipwall:
+                self._final_action_wall()
             assert len(self.strategy) == len(self.quantizable_idx)
             cost = self._cur_cost()
             cost_ratio = cost / self._org_cost()
 
             self._set_mixed_precision(quantizable_idx=self.quantizable_idx, strategy=self.strategy)
-            self.model = calibrate(self.model, self.train_loader)
+
+            # self.model = calibrate(self.model, self.train_loader)
+            # self._get_calibrated_threshold(quantizable_idx=self.quantizable_idx, strategy=self.strategy)
+            
+            self._set_quantizer_threshold(quantizable_idx=self.quantizable_idx, strategy=self.threshold_lut)
+
             if self.finetune_flag:
                 acc = self._finetune(self.train_loader, self.model, epochs=self.finetune_epoch, verbose=False)
                 # train_acc = self._finetune(self.train_loader, self.model, epochs=self.finetune_epoch, verbose=False)
@@ -178,7 +240,7 @@ class LinearQuantizeEnv:
 
         print('before action_wall: ', self.strategy, min_cost, self._cur_cost())
         while min_cost < self._cur_cost() and target < self._cur_cost():
-            # print('current: ', self.strategy, min_cost, self._cur_cost())
+            print('#### current: ', self.strategy, min_cost, self._cur_cost())
             for i, n_bit in enumerate(reversed(self.strategy)):
                 if n_bit[1] > self.min_bit:
                     self.strategy[-(i+1)][1] -= 1
@@ -220,6 +282,28 @@ class LinearQuantizeEnv:
             else:
                 layer.w_bit = quantize_layer_bit_dict[i][0]
                 layer.a_bit = quantize_layer_bit_dict[i][1]
+
+    def _get_calibrated_threshold(self, quantizable_idx, strategy):
+        assert len(quantizable_idx) == len(strategy), \
+            'You should provide the same number of bit setting as layer list for weight quantization!'
+        quantize_layer_bit_dict = {n: b for n, b in zip(quantizable_idx, strategy)}
+        for i, layer in enumerate(self.model.modules()):
+            if i not in quantizable_idx:
+                continue
+            else:
+                print("##:({:7.3f}, {:7.3f}),".format(layer.weight_range.data[0], layer.activation_range.data[0]))
+                # print("#!!!# {:3}, ({:7.3f}, {:7.3f})".format(i, layer.weight_range.data[0], layer.activation_range.data[0]))
+    
+    def _set_quantizer_threshold(self, quantizable_idx, strategy):
+        assert len(quantizable_idx) == len(strategy), \
+            'You should provide the same number of bit setting as layer list for weight quantization!'
+        quantize_layer_bit_dict = {n: b for n, b in zip(quantizable_idx, strategy)}
+        for i, layer in enumerate(self.model.modules()):
+            if i not in quantizable_idx:
+                continue
+            else:
+                layer.weight_range.data[0] = quantize_layer_bit_dict[i][0]
+                layer.activation_range.data[0] = quantize_layer_bit_dict[i][1]
 
     def _cur_cost(self):
         cur_cost = 0.

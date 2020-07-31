@@ -131,6 +131,7 @@ class QModule(nn.Module):
         self._half_wave = half_wave
 
         self.init_range = 6.
+        
         self.activation_range = nn.Parameter(torch.Tensor([self.init_range]))
         self.weight_range = nn.Parameter(torch.Tensor([-1.0]), requires_grad=False)
 
@@ -255,6 +256,7 @@ class QModule(nn.Module):
                 else:
                     estimate_activation_range = min(self.init_range, inputs.abs().max().item())
                 # print('range:', estimate_activation_range, '  shape:', inputs.shape, '  inp_abs_max:', inputs.abs().max())
+                # print("###A, {:7.3f},".format(estimate_activation_range))
                 self.activation_range.data = torch.tensor([estimate_activation_range], device=inputs.device)
                 return inputs
 
@@ -296,6 +298,8 @@ class QModule(nn.Module):
                 else:
                     threshold = weight.abs().max().item()
                 self.weight_range.data[0] = threshold
+                # print('range:', threshold, '  shape:', weight.shape, '  w_abs_max:', weight.abs().max())
+                # print("###W, {:7.3f},".format(threshold))
                 return weight
 
             ori_w = weight

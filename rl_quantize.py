@@ -192,7 +192,7 @@ if __name__ == "__main__":
     parser.add_argument('--finetune_epoch', default=1, type=int, help='')
     parser.add_argument('--finetune_gamma', default=0.8, type=float, help='finetune gamma')
     parser.add_argument('--finetune_lr', default=0.001, type=float, help='finetune gamma')
-    parser.add_argument('--finetune_flag', default=True, type=bool, help='whether to finetune')
+    parser.add_argument('--finetune_flag', default=False, type=bool, help='whether to finetune')
     parser.add_argument('--use_top5', default=False, type=bool, help='whether to use top5 acc in reward')
     parser.add_argument('--train_size', default=20000, type=int, help='number of train data size')
     parser.add_argument('--val_size', default=10000, type=int, help='number of val data size')
