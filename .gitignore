@@ -3,5 +3,5 @@ __pycache__
 checkpoints/
 pretrained/
 data/
-haq_runs/
-
+haq_runs*
+vscode-runs

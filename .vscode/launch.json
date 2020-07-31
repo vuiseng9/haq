@@ -1,0 +1,32 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "MobilenetV2 Latency Constrained Linear Quantization",
+            "type": "python",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "program": "rl_quantize.py",
+            "args": [
+                "--arch", "qmobilenetv2",
+                "--dataset", "imagenet100",
+                "--dataset_root", "data/imagenet100",
+                "--suffix", "ratio0556bit28",
+                "--output", "./vscode-runs/",
+                "--preserve_ratio", "0.556",
+                "--float_bit", "8",
+                "--max_bit", "8",
+                "--min_bit", "2",
+                "--n_worker", "32",
+                "--data_bsize", "128",
+                "--train_size", "20000",
+                "--val_size", "10000",
+                "--linear_quantization"
+            ],
+            "console": "integratedTerminal"
+        }
+    ]
+}
