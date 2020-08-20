@@ -65,31 +65,6 @@ class LinearQuantizeEnv:
         # prepare data
         self._init_data()
 
-        # build indexs
-        self._build_index()
-        self.n_quantizable_layer = len(self.quantizable_idx)
-
-        self.model.load_state_dict(self.pretrained_model, strict=True)
-        # self.org_acc = self._validate(self.val_loader, self.model)
-        self.org_acc = self._validate(self.train_loader, self.model)
-        # build embedding (static part), same as pruning
-        self._build_state_embedding()
-
-        # mode
-        self.cost_mode = 'cloud_latency'
-        self.simulator_batch = 16
-        self.cost_lookuptable = self._get_lookuptable()
-
-        # sanity check
-        assert self.compress_ratio >= self._min_cost() / self._org_cost(), \
-            'Error! You can make achieve compress_ratio smaller than min_bit!'
-
-        # restore weight
-        self.reset()
-        print('=> original acc: {:.3f}% on split dataset(train: %7d, val: %7d )'.format(self.org_acc,
-                                                                                        self.train_size, self.val_size))
-        print('=> original cost: {:.4f}'.format(self._org_cost()))
-
         self.threshold_lut=[
             (  1.361,   2.640),
             (  2.883,   4.277),
@@ -145,6 +120,31 @@ class LinearQuantizeEnv:
             (  0.304,   2.881),
             (  0.827,   5.870),
         ]
+        # build indexs
+        self._build_index()
+        self.n_quantizable_layer = len(self.quantizable_idx)
+
+        self.model.load_state_dict(self.pretrained_model, strict=True)
+        # self.org_acc = self._validate(self.val_loader, self.model)
+        self.org_acc = self._validate(self.train_loader, self.model)
+        # build embedding (static part), same as pruning
+        self._build_state_embedding()
+
+        # mode
+        self.cost_mode = 'cloud_latency'
+        self.simulator_batch = 16
+        self.cost_lookuptable = self._get_lookuptable()
+
+        # sanity check
+        assert self.compress_ratio >= self._min_cost() / self._org_cost(), \
+            'Error! You can make achieve compress_ratio smaller than min_bit!'
+
+        # restore weight
+        self.reset()
+        print('=> original acc: {:.3f}% on split dataset(train: %7d, val: %7d )'.format(self.org_acc,
+                                                                                        self.train_size, self.val_size))
+        print('=> original cost: {:.4f}'.format(self._org_cost()))
+
 
     def adjust_learning_rate(self):
         for param_group in self.optimizer.param_groups:
@@ -168,12 +168,13 @@ class LinearQuantizeEnv:
             cost = self._cur_cost()
             cost_ratio = cost / self._org_cost()
 
-            self._set_mixed_precision(quantizable_idx=self.quantizable_idx, strategy=self.strategy)
+            self._set_mixed_precision(quantizable_idx=self.quantizable_idx, strategy=self.strategy) # hardcoded to int8 here
 
             # self.model = calibrate(self.model, self.train_loader)
             # self._get_calibrated_threshold(quantizable_idx=self.quantizable_idx, strategy=self.strategy)
             
-            self._set_quantizer_threshold(quantizable_idx=self.quantizable_idx, strategy=self.threshold_lut)
+            # self._set_quantizer_threshold(quantizable_idx=self.quantizable_idx, strategy=self.threshold_lut) # set a good threshold, for testing
+            self._set_quantizer_threshold(quantizable_idx=self.quantizable_idx, strategy=self.strategy)
 
             if self.finetune_flag:
                 acc = self._finetune(self.train_loader, self.model, epochs=self.finetune_epoch, verbose=False)
@@ -266,10 +267,17 @@ class LinearQuantizeEnv:
         assert len(self.strategy) == self.cur_ind
         # limit the action to certain range
         action = float(action)
-        min_bit, max_bit = self.bound_list[self.cur_ind]
-        lbound, rbound = min_bit - 0.5, max_bit + 0.5  # same stride length for each bit
+
+        if self.action_radio_button:
+            lut=0
+        else:
+            lut=1
+
+        lbound, rbound = self.bound_list[self.cur_ind][lut]
+
+        # lbound, rbound = min_bit - 0.5, max_bit + 0.5  # same stride length for each bit
         action = (rbound - lbound) * action + lbound
-        action = int(np.round(action, 0))
+        # action = int(np.round(action, 0))
         return action  # not constrained here
 
     def _set_mixed_precision(self, quantizable_idx, strategy):
@@ -280,8 +288,10 @@ class LinearQuantizeEnv:
             if i not in quantizable_idx:
                 continue
             else:
-                layer.w_bit = quantize_layer_bit_dict[i][0]
-                layer.a_bit = quantize_layer_bit_dict[i][1]
+                # layer.w_bit = quantize_layer_bit_dict[i][0]
+                # layer.a_bit = quantize_layer_bit_dict[i][1]
+                layer.w_bit = 4
+                layer.a_bit = 4
 
     def _get_calibrated_threshold(self, quantizable_idx, strategy):
         assert len(quantizable_idx) == len(strategy), \
@@ -308,8 +318,8 @@ class LinearQuantizeEnv:
     def _cur_cost(self):
         cur_cost = 0.
         # quantized
-        for i, n_bit in enumerate(self.strategy):
-            cur_cost += self.cost_lookuptable[i, n_bit[0]-1, n_bit[1]-1]
+        # for i, n_bit in enumerate(self.strategy):
+        #     cur_cost += self.cost_lookuptable[i, n_bit[0]-1, n_bit[1]-1]
         return cur_cost
 
     def _org_cost(self):
@@ -338,7 +348,14 @@ class LinearQuantizeEnv:
         for i, m in enumerate(self.model.modules()):
             if type(m) in self.quantizable_layer_types:
                 self.quantizable_idx.append(i)
-                self.bound_list.append((self.min_bit, self.max_bit))
+                # self.bound_list.append((self.min_bit, self.max_bit))
+                w_val = self.threshold_lut[len(self.quantizable_idx)-1][0]
+                a_val = self.threshold_lut[len(self.quantizable_idx)-1][1]
+
+                self.bound_list.append(
+                    ((w_val*0.4, w_val*1.20),
+                     (a_val*0.4, a_val*1.20))
+                    )
         print('=> Final bound list: {}'.format(self.bound_list))
 
     def _build_state_embedding(self):
